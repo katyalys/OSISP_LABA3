@@ -14,12 +14,14 @@
 #include <limits.h>
 #include <errno.h>
 
-#define BUFSIZE 64*1024*1024
+#define BUFSIZE 4096*64
+
+long count = 0; 
 
 int CopyFile(const char *currName1, const char *currName2, int *bytesCount) {
     mode_t mode;
     struct stat fileInfo;
-  
+
     mode = fileInfo.st_mode;
 
     errno = 0;
@@ -45,8 +47,9 @@ int CopyFile(const char *currName1, const char *currName2, int *bytesCount) {
         if ((writeFile = write(fd, buff, (size_t)readFile)) != -1){
             *bytesCount = *bytesCount + (int)writeFile;
         }
-        free(buff);
+
     }
+    free(buff);
 
     if (close(fs) || close(fd)){
         perror("Error closing file\n");
@@ -58,14 +61,15 @@ int CopyFile(const char *currName1, const char *currName2, int *bytesCount) {
 
 int Process(char *dir1, char *dir2, long maxCount){
 
-    int count = 0;
+    //int count = 0;
     struct stat st1, st2;
+
 
     errno = 0;
     DIR *cd1 = opendir(dir1);
     if (cd1 == NULL){
         fprintf(stderr,"Could not open directory: %s \n", strerror(errno));
-		return -1;
+        return -1;
     }
 
     struct dirent *entry = alloca(sizeof(struct dirent));
@@ -97,64 +101,62 @@ int Process(char *dir1, char *dir2, long maxCount){
         strcat(currName2, entry->d_name);
 
         if (lstat(currName1, &st1) == -1) {
-			fprintf(stderr,"%s: %s\n", currName1, strerror(errno));
-			return -1;
-		}
+            fprintf(stderr,"%s: %s\n", currName1, strerror(errno));
+            continue; 
+        }
 
         if (S_ISDIR(st1.st_mode)) {
 
             if ((strcmp(entry->d_name, ".") != 0) && (strcmp(entry->d_name, "..") != 0))  {
+
+                // если нет такой папки, то создаю
                 if (stat(currName2, &st2) != 0) {
 
                     if (mkdir(currName2, st1.st_mode) == -1){
                         fprintf(stderr,"%s: %s\n", currName2, strerror(errno));
-			            return -1;
+                        continue; 
                     }
-                }
-                else if (stat(currName2, &st2) == -1){
-                    fprintf(stderr,"%s: %s\n", currName2, strerror(errno));
-			        return -1;
                 }
                 Process(currName1, currName2, maxCount);
             }
         }
-        else if (S_ISREG(st1.st_mode)) 
+        else if (S_ISREG(st1.st_mode))
         {
-            if (count >= maxCount){
-
-                int status;
-                if (wait(&status) != -1){
+            if (count >= maxCount) {
+                int status = 0;
+                if (wait(&status) != -1) {
                     count--;
                 }
             }
-    
+
             if ((stat(currName2, &st2) != 0)) {
                 pid_t pid = fork();
                 if (pid == 0) {
 
                     int bytesCount = 0;
-                    CopyFile(currName1, currName2, &bytesCount);
+                    int errCode = CopyFile(currName1, currName2, &bytesCount);
 
-                    if (chmod(currName2, st1.st_mode) == -1){
-                        fprintf(stderr,"%s: %s\n", currName2, strerror(errno));
-			            return -1;
+                    if (errCode == -1) {
+                        exit(-1);
                     }
 
-                  //  if (bytesCount != 0) {
-                        printf("%d: %s (%d byte)\n", getpid(), currName1, bytesCount);
-                  //  }
+                    if (chmod(currName2, st1.st_mode) == -1) {
+                        fprintf(stderr,"%s: %s\n", currName2, strerror(errno));
+                        exit(-1); 
+                    }
+
+                    printf("%d: %s (%d byte)\n", getpid(), currName1, bytesCount);
                     exit(EXIT_SUCCESS);
                 }
-
                 count++;
-            } 
+            }
 
         }
     }
-    
+
     if (closedir(cd1) == -1){
         fprintf(stderr,"%s: %s\n", currName1, strerror(errno));
-		return -1;
+        return -1;
     }
 
     return 0;
@@ -163,20 +165,20 @@ int Process(char *dir1, char *dir2, long maxCount){
 int main(int argc, char **argv){
 
     if(argc != 4){
-		fprintf(stderr, "Enter valid number of arguments: 1 - exe-file, 2 - directory.\n");
-		return -1;
-	}
+        fprintf(stderr, "Enter valid number of arguments: 1 - exe-file, 2 - directory.\n");
+        return -1;
+    }
 
-    char *dir1 = realpath(argv[1], NULL); 
-    char *dir2 = realpath(argv[2], NULL); 
+    char *dir1 = realpath(argv[1], NULL);
+    char *dir2 = realpath(argv[2], NULL);
 
-	if(!dir1) {
-		fprintf(stderr,"%s: %s: %s\n", argv[0], argv[1], strerror(errno)); 
-		return -1;
-	}
+    if(!dir1) {
+        fprintf(stderr,"%s: %s: %s\n", argv[0], argv[1], strerror(errno));
+        return -1;
+    }
     else if(!dir2){
         fprintf(stderr,"%s: %s: %s\n", argv[0], argv[2], strerror(errno));
-		return -1;
+        return -1;
     }
 
     char* endptr;
